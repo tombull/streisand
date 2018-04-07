@@ -32,7 +32,7 @@
     owner: "{{ aws_ami_owner }}"
     region: "{{ aws_region }}"
     name: "{{ aws_ami_name }}"
-    sort: name
+    sort: creationDate
     sort_order: descending
     sort_end: 1
   register: ami
@@ -42,6 +42,8 @@
     aws_access_key: "{{ aws_access_key }}"
     aws_secret_key: "{{ aws_secret_key }}"
     instance_type: "{{ aws_instance_type }}"
+    spot_type: persistent
+    spot_price: "0.10"
     image: "{{ ami.results[0].ami_id }}"
     region: "{{ aws_region }}"
     vpc_subnet_id: "{{ aws_vpc_subnet_id | default(omit) }}"
@@ -52,27 +54,27 @@
       Name: "{{ aws_instance_name }}"
     wait: yes
   register: streisand_server
-
-- name: Create CloudWatch alarm to auto-recover instance
-  ec2_metric_alarm:
-    name: "autorecover-{{ aws_instance_name }}"
-    description: "This alarm will auto-recover the EC2 instance on host failure"
-    state: present
-    aws_access_key: "{{ aws_access_key }}"
-    aws_secret_key: "{{ aws_secret_key }}"
-    region: "{{ aws_region }}"
-    namespace: "AWS/EC2"
-    metric: StatusCheckFailed_System
-    statistic: Minimum
-    comparison: ">"
-    threshold: 0.0
-    period: 60
-    evaluation_periods: 2
-    dimensions:
-      InstanceId: "{{ streisand_server.instances[0].id }}"
-    alarm_actions:
-      - "arn:aws:automate:{{ aws_region }}:ec2:recover"
-  when: aws_instance_type.startswith(("t2", "c3", "c4", "m3", "m4", "r3", "x1"))
+#
+# - name: Create CloudWatch alarm to auto-recover instance
+#   ec2_metric_alarm:
+#     name: "autorecover-{{ aws_instance_name }}"
+#     description: "This alarm will auto-recover the EC2 instance on host failure"
+#     state: present
+#     aws_access_key: "{{ aws_access_key }}"
+#     aws_secret_key: "{{ aws_secret_key }}"
+#     region: "{{ aws_region }}"
+#     namespace: "AWS/EC2"
+#     metric: StatusCheckFailed_System
+#     statistic: Minimum
+#     comparison: ">"
+#     threshold: 0.0
+#     period: 60
+#     evaluation_periods: 2
+#     dimensions:
+#       InstanceId: "{{ streisand_server.instances[0].id }}"
+#     alarm_actions:
+#       - "arn:aws:automate:{{ aws_region }}:ec2:recover"
+#   when: aws_instance_type.startswith(("t2", "c3", "c4", "m3", "m4", "r3", "x1"))
 
 - name: Wait until the server has finished booting and OpenSSH is accepting connections
   wait_for:
@@ -89,6 +91,16 @@
     device_id: "{{ streisand_server.instances[0].id }}"
     in_vpc: "{{ aws_vpc_id is defined and aws_vpc_id != '' }}"
   register: instance_eip
+
+- name: Set up DNS record
+  cloudflare_dns:
+    solo: true
+    zone: "{{ cloudflare_dns_zone }}"
+    type: A
+    record: "{{ regions_friendly_names[aws_region_var] }}.vpn"
+    value: "{{ instance_eip.public_ip }}"
+    account_email: "{{ cloudflare_account_email }}"
+    account_api_token: "{{ cloudflare_api_token }}"
 
 - name: Create the in-memory inventory group
   add_host:

@@ -32,11 +32,16 @@
 
 - import_tasks: firewall.yml
 
+- name: Ensure that the Apache web server is not installed in order to avoid conflicts with acmetool
+  apt:
+    name: apache2
+    state: absent
+    
 # Now we try to request a certificate. If it fails. We print a warning and
 # fall back to self-signed certificates.
 - block:
     - name: Request initial certificate from Let's Encrypt
-      command: "acmetool want {{ streisand_domain }}"
+      command: "acmetool --xlog.severity=debug want {{ streisand_domain }}"
       args:
         creates: "{{ le_certificate }}"
 
